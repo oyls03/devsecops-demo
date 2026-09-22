@@ -1,0 +1,117 @@
+name: DevSecOps Pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sast:
+    name: SAST - CodeQL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+
+      - name: Analyze source code
+        uses: github/codeql-action/analyze@v4
+
+  dependency-scan:
+    name: SCA - Trivy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+  secrets-scan:
+    name: Secrets - Gitleaks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+
+  build:
+    name: Build Container Image
+    runs-on: ubuntu-latest
+
+    needs:
+      - sast
+      - dependency-scan
+      - secrets-scan
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t devsecops-demo:${{ github.sha }} .
+
+  container-scan:
+    name: Container Scan - Trivy
+    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t devsecops-demo:${{ github.sha }} .
+
+      - name: Scan container image
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: devsecops-demo:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+
+  deploy:
+    name: Mock OpenShift Deployment
+    runs-on: ubuntu-latest
+
+    needs:
+      - container-scan
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Validate OpenShift manifests
+        run: |
+          echo "OpenShift deployment would be performed here."
+          echo "Manifests:"
+          ls -1 openshift/
+
+      - name: Mock deployment
+        run: |
+          echo "Security checks passed."
+          echo "Container image: devsecops-demo:${{ github.sha }}"
+          echo "OpenShift deployment step intentionally mocked for this showcase."
